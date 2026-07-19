@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cámaras a WhatsApp</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">RTSP / MJPEG + WAHA</p><h1>Envíos de cámara</h1><p class="subtle">Captura, programa y supervisa tus cámaras desde un solo lugar.</p></div>
+      <span id="connection-status" class="status-chip muted">Sin conectar</span>
+    </header>
+
+    <section id="login" class="card login-card">
+      <h2>Acceso</h2><label>Token de aplicación<input id="token" type="password" placeholder="APP_API_TOKEN"></label><button id="connect">Conectar</button><p class="subtle">El token se guarda solo en este navegador.</p>
+    </section>
+
+    <section id="panel" hidden>
+      <nav class="tab-nav" aria-label="Secciones principales">
+        <button type="button" class="tab active" data-tab="tasks">Tareas</button>
+        <button type="button" class="tab" data-tab="cameras">Configuración</button>
+        <button type="button" class="tab" data-tab="logs">Logs</button>
+      </nav>
+
+      <section id="tab-tasks" class="tab-pane">
+        <div class="tasks-layout">
+          <form id="job-form" class="card">
+            <div class="section-heading"><h2 id="form-title">Nueva tarea</h2><span class="subtle">Envío</span></div>
+            <label>Nombre<input id="name" required placeholder="Ronda mañana"></label>
+            <div class="grid"><label>Tipo<select id="kind"><option value="snapshot">Foto</option><option value="video">Video corto</option><option value="timelapse">Timelapse</option></select></label><label>Fuente<select id="stream_id" required></select></label></div>
+            <label id="video-duration-field">Duración del video (s)<input id="duration" type="number" min="2" max="60" value="10"></label>
+            <div id="timelapse-fields" class="timelapse-fields"><div class="grid"><label>Observar durante<select id="timelapse_duration"><option value="900">15 minutos</option><option value="1800">30 minutos</option><option value="3600" selected>1 hora</option><option value="7200">2 horas</option><option value="14400">4 horas</option></select></label><label>Tomar una foto cada<select id="timelapse_interval"><option value="5">5 segundos</option><option value="15">15 segundos</option><option value="30">30 segundos</option><option value="60" selected>1 minuto</option><option value="300">5 minutos</option></select></label></div><input id="timelapse_frames" type="hidden" value="61"><input id="timelapse_fps" type="hidden" value="24"><div class="timelapse-helper"><strong id="timelapse-estimate"></strong><span id="timelapse-detail"></span><span>Reproducción fija a 24 FPS para que el resultado se vea fluido.</span></div></div>
+            <label>Destinatario<select id="recipient_id" required></select></label><input id="chat_id" type="hidden"><input id="delivery_channel" type="hidden" value="waha"><p id="recipient-hint" class="subtle"></p>
+            <label>Cuándo enviar<select id="schedule_mode"><option value="hourly">Cada hora</option><option value="daily" selected>Todos los días</option><option value="every_15">Cada 15 minutos</option><option value="every_30">Cada 30 minutos</option><option value="custom">Configuración avanzada</option></select></label>
+            <label id="schedule-time-field">Hora de envío<input id="schedule_time" type="time" value="08:00"></label><label id="cron-field" hidden>Expresión cron<input id="cron" placeholder="0 8 * * *"><small>Úsalo solo si necesitas una regla especial.</small></label>
+            <label>Texto del mensaje<textarea id="caption" placeholder="Cámara: ronda programada"></textarea></label><label class="switch"><input id="enabled" type="checkbox" checked> Activa</label>
+            <div class="actions"><button type="submit">Guardar tarea</button><button type="button" class="secondary" id="cancel" hidden>Cancelar</button></div>
+          </form>
+
+          <section class="jobs-panel">
+            <div class="jobs-heading"><div><p class="eyebrow">Vista principal</p><h2>Tareas</h2></div><button type="button" class="secondary compact" id="refresh">Actualizar</button></div>
+            <p id="message" role="status"></p>
+            <section id="snapshot-preview" class="preview-card" hidden><div class="job-head"><div><p class="eyebrow">Vista actual</p><strong id="preview-title">Cámara</strong></div><button type="button" class="secondary compact" id="preview-close">Cerrar</button></div><div class="preview-frame"><img id="preview-image" alt="Instantánea actual de la cámara"><p id="preview-loading">Traiendo instantánea…</p></div><p id="preview-meta" class="meta"></p></section>
+            <div id="jobs"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-cameras" class="tab-pane" hidden>
+        <details class="config-block" open><summary><span>Cámaras</span><small>Agregar, editar, probar y eliminar fuentes</small></summary><div class="config-content camera-layout">
+          <form id="stream-form" class="card"><div class="section-heading"><h2 id="stream-title">Nueva cámara</h2><span class="subtle">Configuración</span></div><label>Nombre<input id="stream_name" required placeholder="Patio"></label><div class="grid"><label>Fuente<select id="source_type"><option value="rtsp">RTSP</option><option value="mjpeg">MJPEG</option></select></label><label>Estabilización RTSP (s)<input id="warmup_seconds" type="number" min="0" max="120" value="10"></label></div><label>URL del stream<input id="source_url" required placeholder="rtsp://... o http://go2rtc:1984/api/stream.mjpeg?src=ec6"></label><label class="switch"><input id="stream_enabled" type="checkbox" checked> Activa</label><div class="actions"><button type="submit">Guardar cámara</button><button type="button" class="secondary" id="stream-cancel" hidden>Cancelar</button></div></form>
+          <section class="camera-list-panel"><div class="jobs-heading"><div><p class="eyebrow">Fuentes configuradas</p><h2>Cámaras</h2></div></div><div id="streams" class="stream-list"></div></section>
+        </div></details>
+        <details class="config-block"><summary><span>WhatsApp / WAHA</span><small id="waha-summary">Configuración del canal WhatsApp</small></summary><form id="waha-settings-form" class="config-content card"><label>URL WAHA<input id="settings_waha_url" placeholder="http://waha:3000"></label><label>Sesión WAHA<input id="settings_waha_session" placeholder="default"></label><label>API Key WAHA<input id="settings_waha_api_key" type="password" placeholder="Deja vacío para conservar"></label><div class="actions"><button type="submit">Guardar WAHA</button></div></form></details>
+        <details class="config-block"><summary><span>Telegram</span><small id="telegram-summary">Configuración del bot</small></summary><form id="telegram-settings-form" class="config-content card"><label>Token del bot<input id="settings_telegram_token" type="password" placeholder="Deja vacío para conservar"></label><p class="subtle">Crea destinatarios de tipo Telegram usando su chat ID.</p><div class="actions"><button type="submit">Guardar Telegram</button></div></form></details>
+        <details class="config-block"><summary><span>Destinatarios</span><small>Agenda para WhatsApp y Telegram</small></summary><div class="config-content integration-grid"><form id="recipient-form" class="card"><div class="section-heading"><h2>Nuevo destinatario</h2><span class="subtle">Agenda</span></div><label>Nombre<input id="recipient_name" required placeholder="Guardia turno noche"></label><label>Canal<select id="recipient_channel"><option value="waha">WhatsApp</option><option value="telegram">Telegram</option></select></label><label>Destino<input id="recipient_destination" required placeholder="56912345678@c.us o chat ID Telegram"></label><label class="switch"><input id="recipient_enabled" type="checkbox" checked> Activo</label><div class="actions"><button type="submit">Agregar destinatario</button></div></form><section class="camera-list-panel"><div id="recipients"></div></section></div></details>
+      </section>
+
+      <section id="tab-logs" class="tab-pane" hidden>
+        <section class="logs-card"><div class="jobs-heading"><div><p class="eyebrow">Diagnóstico</p><h2>Logs de la aplicación</h2><p class="subtle">Últimas 200 líneas; se actualiza mientras esta pestaña está abierta.</p></div><button type="button" class="secondary compact" id="logs-refresh">Actualizar</button></div><pre id="logs-output">Carga los logs para comenzar.</pre></section>
+      </section>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

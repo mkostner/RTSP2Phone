@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+data/
+media/
+timelapse-tests/
+*.db
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+graphify-out/

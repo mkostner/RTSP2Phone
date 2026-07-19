@@ -1,0 +1,21 @@
+services:
+  camera-notifier:
+    build: .
+    container_name: camera-notifier
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8088:8000"
+    volumes:
+      - camera_notifier_data:/app/data
+    # If WAHA is in another compose project, attach both services to this
+    # external network and set WAHA_URL=http://waha:3000 in .env.
+    networks:
+      - camera-notifier
+
+volumes:
+  camera_notifier_data:
+
+networks:
+  camera-notifier:
+    name: camera-notifier

@@ -1,0 +1,10 @@
+.env
+.git
+.agents
+.codex
+graphify-out
+app/graphify-out
+__pycache__
+app/__pycache__
+data
+media
