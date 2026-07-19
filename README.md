@@ -1,4 +1,4 @@
-# Portal al Sur · Camera Notifier
+# RTSP2Phone
 
 Portal Docker para capturar snapshots, videos cortos y timelapses desde cámaras RTSP/MJPEG, programarlos con calendario y enviarlos por WhatsApp (WAHA) o Telegram.
 
@@ -36,8 +36,8 @@ flowchart LR
 ## Inicio rápido
 
 ```bash
-git clone https://github.com/TU_USUARIO/portal-al-sur.git
-cd portal-al-sur
+git clone https://github.com/TU_USUARIO/RTSP2Phone.git
+cd RTSP2Phone
 cp .env.example .env
 # Define APP_API_TOKEN; las integraciones se pueden completar luego en el portal.
 docker compose up -d --build
