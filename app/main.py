@@ -7,7 +7,6 @@ import subprocess
 import uuid
 import logging
 import re
-import shutil
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,7 +23,9 @@ from pydantic import BaseModel, Field, field_validator
 from starlette.background import BackgroundTask
 
 DATA = Path("/app/data")
-MEDIA = Path("/app/media")
+# Keep media inside the Docker volume so a container restart cannot discard it.
+MEDIA = DATA / "media"
+TIMELAPSE_RUNS = MEDIA / "timelapses"
 DB = DATA / "jobs.db"
 LOG_FILE = DATA / "camera-notifier.log"
 TZ = ZoneInfo(os.getenv("TZ", "America/Santiago"))
@@ -242,6 +243,28 @@ def safe_exception(exc: BaseException) -> str:
     return safe_ffmpeg_error(str(exc), exc.__class__.__name__)
 
 
+def write_timelapse_manifest(run_dir: Path, manifest: dict) -> None:
+    """Atomically persist progress without storing stream credentials."""
+    temporary = run_dir / "manifest.json.tmp"
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(run_dir / "manifest.json")
+
+
+def mark_timelapse_delivery(file: Path, status: str, error: str | None = None) -> None:
+    """Record delivery status while keeping the generated media recoverable."""
+    manifest_path = file.parent / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        manifest.update({"delivery_status": status, "delivery_updated_at": now()})
+        if error:
+            manifest["delivery_error"] = error
+        else:
+            manifest.pop("delivery_error", None)
+        write_timelapse_manifest(file.parent, manifest)
+    except OSError as exc:
+        logger.warning("Could not update persistent timelapse delivery state for %s: %s", file.name, exc)
+
+
 def capture_with_retry(kind: str, duration: int, stream: dict, job: dict | None = None) -> Path:
     """Retry transient failures while opening a live RTSP source."""
     attempts = 3 if stream["source_type"] == "rtsp" else 1
@@ -269,13 +292,27 @@ def capture_timelapse(stream: dict, job: dict) -> Path:
     failed photo is skipped and the remaining files stay contiguous for
     ffmpeg's image-sequence input.
     """
-    MEDIA.mkdir(parents=True, exist_ok=True)
-    frame_dir = MEDIA / f"timelapse-{uuid.uuid4().hex}"
-    target = MEDIA / f"timelapse-{datetime.now(TZ):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.mp4"
+    TIMELAPSE_RUNS.mkdir(parents=True, exist_ok=True)
+    run_id = f"{datetime.now(TZ):%Y%m%d-%H%M%S}-{job['id'][:8]}-{uuid.uuid4().hex[:8]}"
+    frame_dir = TIMELAPSE_RUNS / run_id
+    target = frame_dir / "timelapse.mp4"
     frame_dir.mkdir()
     frames = job["timelapse_frames"]
     interval = job["timelapse_interval_seconds"]
     captured_frames = 0
+    manifest = {
+        "run_id": run_id,
+        "job_id": job["id"],
+        "job_name": job["name"],
+        "kind": "timelapse",
+        "started_at": now(),
+        "status": "capturing",
+        "expected_frames": frames,
+        "captured_frames": captured_frames,
+        "interval_seconds": interval,
+        "fps": job["timelapse_fps"],
+    }
+    write_timelapse_manifest(frame_dir, manifest)
     update_job_progress(job["id"], 0, frames, "Capturando", f"Preparando 0 de {frames} fotos")
     try:
         for index in range(frames):
@@ -292,6 +329,9 @@ def capture_timelapse(stream: dict, job: dict) -> Path:
                     "Timelapse %s: frame %s/%s unavailable: %s",
                     job["id"], index + 1, frames, safe_exception(exc),
                 )
+                manifest["last_frame_error"] = safe_exception(exc)
+            manifest.update({"captured_frames": captured_frames, "updated_at": now()})
+            write_timelapse_manifest(frame_dir, manifest)
             update_job_progress(
                 job["id"], index + 1, frames, "Capturando",
                 f"Foto {index + 1} de {frames} · {captured_frames} capturadas",
@@ -304,6 +344,8 @@ def capture_timelapse(stream: dict, job: dict) -> Path:
         if captured_frames == 0:
             raise RuntimeError("No se pudo capturar ningún frame del timelapse")
         update_job_progress(job["id"], frames, frames, "Generando video", f"Codificando {captured_frames} fotos")
+        manifest.update({"status": "encoding", "captured_frames": captured_frames, "updated_at": now()})
+        write_timelapse_manifest(frame_dir, manifest)
         cmd = [
             "ffmpeg", "-y", "-framerate", str(job["timelapse_fps"]),
             "-i", str(frame_dir / "frame-%05d.jpg"), "-an", "-c:v", "libx264",
@@ -313,10 +355,25 @@ def capture_timelapse(stream: dict, job: dict) -> Path:
         completed = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         if completed.returncode or not target.exists() or target.stat().st_size == 0:
             raise RuntimeError(safe_ffmpeg_error(completed.stderr, "ffmpeg no generó el timelapse"))
+        manifest.update({
+            "status": "completed",
+            "captured_frames": captured_frames,
+            "completed_at": now(),
+            "video": target.name,
+            "video_bytes": target.stat().st_size,
+        })
+        write_timelapse_manifest(frame_dir, manifest)
         logger.info("Timelapse %s completed: %s/%s frames, file=%s, bytes=%s", job["id"], captured_frames, frames, target.name, target.stat().st_size)
         return target
-    finally:
-        shutil.rmtree(frame_dir, ignore_errors=True)
+    except Exception as exc:
+        manifest.update({
+            "status": "failed",
+            "captured_frames": captured_frames,
+            "failed_at": now(),
+            "error": safe_exception(exc),
+        })
+        write_timelapse_manifest(frame_dir, manifest)
+        raise
 
 
 def capture(kind: str, duration: int, stream: dict, job: dict | None = None) -> Path:
@@ -399,11 +456,17 @@ async def execute(job: dict) -> None:
         update_job_progress(job["id"], total, total, "Enviando", "Enviando por WhatsApp")
         await send_to_channel(file, job)
         status, error = "sent", None
+        if job["kind"] == "timelapse":
+            mark_timelapse_delivery(file, "sent")
         logger.info("Job %s sent successfully: file=%s bytes=%s", job["id"], file.name, file.stat().st_size)
     except Exception as exc:
         status, error = "error", safe_exception(exc)
+        if file and job["kind"] == "timelapse":
+            mark_timelapse_delivery(file, "error", error)
     finally:
-        if file:
+        # Timelapses retain every captured frame and the generated MP4 even
+        # when delivery fails; only confirmed non-timelapse deliveries clean up.
+        if file and job["kind"] != "timelapse" and status == "sent":
             file.unlink(missing_ok=True)
     try:
         with connect() as con:

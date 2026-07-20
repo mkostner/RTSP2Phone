@@ -94,6 +94,8 @@ El portal trabaja a **24 FPS fijos**. Solo eliges tiempo real de observación y 
 
 La estabilización RTSP es parte de la cadencia real: si tarda 10 s, no es posible capturar un frame nuevo cada 5 s sin usar una fuente persistente/relay más rápido.
 
+Cada ejecución guarda cada foto inmediatamente en el volumen persistente, bajo `media/timelapses/<ejecución>/`. La carpeta conserva los `frame-*.jpg`, el `timelapse.mp4` y un `manifest.json` con el avance y el resultado de entrega. Si el contenedor se reinicia o WhatsApp/Telegram falla, lo ya capturado permanece recuperable.
+
 ## Variables de entorno
 
 Las variables son respaldo de inicio. Los canales también pueden configurarse desde el portal y se persisten en el volumen Docker.
